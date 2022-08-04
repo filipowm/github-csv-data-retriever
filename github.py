@@ -36,13 +36,25 @@ class Github:
         session.keep_alive = False
         return session
 
+    def _do_retry(self, function, retry_num, should_retry=True):
+        return self._with_session(function, ++retry_num) if should_retry and retry_num <= self.retries_limit else None
+
     def _with_session(self, function, retry_num=0):
-        session = self.__start_session()
-        response = function(session)
-        if self.__has_errors(response):
-            should_retry = self.__handle_errors(response)
-            return self._with_session(function, ++retry_num) if should_retry and retry_num <= self.retries_limit else None
-        return response.json()
+        try:
+            session = self.__start_session()
+            response = function(session)
+            if self.__has_errors(response):
+                should_retry = self.__handle_response_errors(response)
+                return self._do_retry(function, retry_num, should_retry)
+            return response.json()
+        except TimeoutError:
+            logger.exception("Request timed out. Waiting 10s before continuing.")
+            time.sleep(10)
+            return self._do_retry(function, retry_num)
+        except ConnectionError:
+            logger.exception("Unknown connection error. Waiting 10s before continuing.")
+            time.sleep(10)
+            return self._do_retry(function, retry_num)
 
     def post(self, path, body):
         return self._with_session(lambda session: session.post(url=f"{self.base_url}/{path}", json=body))
@@ -64,7 +76,7 @@ class Github:
     def __has_errors(response):
         return response.status_code >= 400
 
-    def __handle_errors(self, response):
+    def __handle_response_errors(self, response):
         status_code = response.status_code
         wait_time_seconds = 10
         if status_code == 404:
@@ -82,8 +94,9 @@ class Github:
                 return False
         else:
             logger.warning(f"Request failed with status code: {status_code}")
+        wait_time_seconds = wait_time_seconds if wait_time_seconds > 0 else 10
         logger.warning(f"Waiting {wait_time_seconds}s for retry")
-        time.sleep(wait_time_seconds)
+        sleep(wait_time_seconds)
         return True
 
     @staticmethod
@@ -97,3 +110,13 @@ class Github:
         current_timestamp = time.time()
         reset_timestamp = int(reset_timestamp_str) if reset_timestamp_str is not None else current_timestamp
         return round(reset_timestamp - current_timestamp)
+
+
+def sleep(sleep_for_seconds):
+    if sleep_for_seconds > 500:
+        time.sleep(500)
+        remaining = sleep_for_seconds - 500
+        logger.warning(f"Sleeping remaining {remaining}s")
+        sleep(remaining)
+    elif sleep_for_seconds > 0:
+        time.sleep(sleep_for_seconds)
