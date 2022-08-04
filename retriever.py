@@ -101,15 +101,18 @@ class DataFetcher(object):
             readme = self.github.get_readme(repo['name_with_owner'])
             repo['readme'] = readme
 
-    def read_repos_data(self, max_projects=200, more_than_stars=500):
-        logging.info(f"Reading repos data with maximum of {max_projects} projects, starting from those with {more_than_stars} stars")
-        gql = self.gql_format % (f"stars:>{more_than_stars}", PAGE_SIZE, "null")
+    def read_repos_data(self, max_projects=200, more_than_stars=500, start_cursor=None):
+        logging.info(f"Reading repos data chunk with maximum of {max_projects} projects with more than {more_than_stars} stars, starting from cursor {start_cursor}")
+        parsed_start_cursor = f"\"{start_cursor}\"" if start_cursor is not None else "null"
+        gql = self.gql_format % (f"stars:>{more_than_stars}", PAGE_SIZE, parsed_start_cursor)
         repos_data = []
         pages = math.ceil(max_projects / 100)
+        next_cursor = start_cursor
         for i in range(pages):  # cap limit on 100k projects
-            logging.info(f"Reading page {i}")
+            logging.info(f"Reading page {i} with cursor {next_cursor}")
             repos_stars_gql = self.github.graphql(gql)
-            repos_data_part, next_cursor = self.parse_gql_result(repos_stars_gql)
+            repos_data_part, _next_cursor = self.parse_gql_result(repos_stars_gql)
+            next_cursor = _next_cursor
             if len(repos_data_part) == 0:
                 logging.info("No more data available in Github. Time to stop querying.")
                 break
@@ -119,10 +122,9 @@ class DataFetcher(object):
             if next_cursor is None:
                 logging.info("Next cursor is null, so no more data to read. Time to stop querying.")
                 break
-            logging.info(f"next cursor: {next_cursor}")
             gql = self.gql_format % (f"stars:>{more_than_stars}", PAGE_SIZE, f"\"{next_cursor}\"")
-        logging.info("Data read successfully!")
-        return repos_data
+        logging.info("Data chunk read successfully!")
+        return repos_data, next_cursor
 
 
 class WriteFile(object):
@@ -154,7 +156,7 @@ def run():
     os.chdir(os.path.join(root_path, 'data'))
 
     data_size_max = 200_000
-    chunk_size = 3_000
+    chunk_size = 5_000
     chunks_max = math.ceil(data_size_max / chunk_size)
     start_from_stars = 1_00
 
@@ -162,13 +164,18 @@ def run():
     processor = DataFetcher()
 
     wt_obj = WriteFile()
+    start_cursor = None
     for i in range(chunks_max):
         logging.info(f"Reading data chunk {i}")
-        repos_data = processor.read_repos_data(max_projects=chunk_size, more_than_stars=start_from_stars)
+        repos_data, next_cursor = processor.read_repos_data(max_projects=chunk_size, more_than_stars=start_from_stars, start_cursor=start_cursor)
         if len(repos_data) == 0:
             logging.info("Data fetching has ended cause no data in sink.")
             break
         wt_obj.save_to_csv(repos_data, f"github-{save_date}-{i}.csv")
+        if next_cursor is None:
+            logging.info("Data fetching has ended cause no data in sink.")
+            break
+        start_cursor = next_cursor
 
 
 if __name__ == "__main__":
