@@ -63,9 +63,13 @@ class Github:
         return self._with_session(lambda session: session.get(url=f"{self.base_url}/{path}"))
 
     def get_readme(github, name_with_owner):
-        data = github.get(f"repos/{name_with_owner}/readme")
-        base64_content = data['content'] if data is not None else None
-        return base64.b64decode(base64_content).decode("utf-8") if base64_content is not None and len(base64_content) > 0 else None
+        try:
+            data = github.get(f"repos/{name_with_owner}/readme")
+            base64_content = data.get('content') if data is not None else None
+            return base64.b64decode(base64_content).decode("utf-8") if base64_content is not None and len(base64_content) > 0 else None
+        except:
+            logger.error(f"Failed when reading readme at 'repos/{name_with_owner}/readme'")
+            return None
 
     def graphql(self, query):
         return self.post("graphql", {
