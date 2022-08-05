@@ -24,7 +24,7 @@ class DataFetcher(object):
         self.total_read = 0
         self.reset_counter = MAX_ITEMS_PER_QUERY
         self.gql_format = """query{
-            search(query: "%s sort:stars-desc", type: REPOSITORY, first: %d, after: %s) {
+            search(query: "%s sort:stars-asc", type: REPOSITORY, first: %d, after: %s) {
                 pageInfo {
       			    startCursor
       			    endCursor
@@ -84,6 +84,8 @@ class DataFetcher(object):
             # topics = list(map(lambda topic: {'name': topic['topic']['name'], 'stars': topic['topic']['stargazerCount']},
             #                   repo_data['repositoryTopics']['nodes']))
             topics = list(map(lambda topic: topic['topic']['name'], repo_data['repositoryTopics']['nodes']))
+            if len(topics) == 0:
+                continue
             languages = list(map(lambda language: language['name'], repo_data['languages']['nodes']))
             partial_data.append({
                 'name': repo_data['name'],
@@ -123,7 +125,8 @@ class DataFetcher(object):
                 break
             logging.info("Enhancing fetched data with readme")
             self._enhance_repos_with_readme(repos_data_part)
-            repos_data.extend(repos_data_part)
+            data_with_readme = filter(lambda repo: repo['readme'] is not None, repos_data_part)
+            repos_data.extend(data_with_readme)
 
             if self.reset_counter <= 0:
                 # reset cursor each 1000 items
@@ -168,7 +171,7 @@ def run():
     logging.info(f"Result will be saved under {root_path}/data")
     os.chdir(os.path.join(root_path, 'data'))
 
-    data_size_max = 200_000
+    data_size_max = 500_000
     chunk_size = 3_000
     chunks_max = math.ceil(data_size_max / chunk_size)
     start_from_stars = 1_00
