@@ -84,8 +84,6 @@ class DataFetcher(object):
             # topics = list(map(lambda topic: {'name': topic['topic']['name'], 'stars': topic['topic']['stargazerCount']},
             #                   repo_data['repositoryTopics']['nodes']))
             topics = list(map(lambda topic: topic['topic']['name'], repo_data['repositoryTopics']['nodes']))
-            if len(topics) == 0:
-                continue
             languages = list(map(lambda language: language['name'], repo_data['languages']['nodes']))
             partial_data.append({
                 'name': repo_data['name'],
@@ -119,14 +117,14 @@ class DataFetcher(object):
             repos_data_part, _next_cursor = self.parse_gql_result(repos_stars_gql)
             self.reset_counter = self.reset_counter - len(repos_data_part)
             self.total_read = self.total_read + len(repos_data_part)
-
+            repos_data_part = list(filter(lambda repo: len(repo['topics']) > 0, repos_data_part))
             if len(repos_data_part) == 0:
                 logging.info("No more data available in Github. Time to stop querying.")
                 break
             logging.info("Enhancing fetched data with readme")
             self._enhance_repos_with_readme(repos_data_part)
-            data_with_readme = filter(lambda repo: repo['readme'] is not None, repos_data_part)
-            repos_data.extend(data_with_readme)
+            repos_data_part = list(filter(lambda repo: repo['readme'] is not None, repos_data_part))
+            repos_data.extend(repos_data_part)
 
             if self.reset_counter <= 0:
                 # reset cursor each 1000 items
