@@ -23,6 +23,7 @@ class DataFetcher(object):
     def __init__(self):
         self.total_read = 0
         self.reset_counter = MAX_ITEMS_PER_QUERY
+        self.read_ids = []
         self.gql_format = """query{
             search(query: "%s sort:stars-asc", type: REPOSITORY, first: %d, after: %s) {
                 pageInfo {
@@ -86,6 +87,7 @@ class DataFetcher(object):
             topics = list(map(lambda topic: topic['topic']['name'], repo_data['repositoryTopics']['nodes']))
             languages = list(map(lambda language: language['name'], repo_data['languages']['nodes']))
             partial_data.append({
+                'id': repo_data['id'],
                 'name': repo_data['name'],
                 'name_with_owner': repo_data['nameWithOwner'],
                 'stargazers_count': repo_data['stargazerCount'],
@@ -121,15 +123,25 @@ class DataFetcher(object):
                 logging.info("No more data available in Github. Time to stop querying.")
                 break
             logging.info("Enhancing fetched data with readme")
+            last_stargazers_count = repos_data_part[-1]["stargazers_count"]
+
+            # filter out already read projects in case of duplicated read
+            repos_data_part = list(filter(lambda repo: repo['id'] not in self.read_ids, repos_data_part))
+            self.read_ids.extend(list(map(lambda repo: repo['id'], repos_data_part)))
+
+            # filter out projects without topics
             repos_data_part = list(filter(lambda repo: len(repo['topics']) > 0, repos_data_part))
             self._enhance_repos_with_readme(repos_data_part)
+
+            # filter out projects without readme
             repos_data_part = list(filter(lambda repo: repo['readme'] is not None, repos_data_part))
+
             repos_data.extend(repos_data_part)
 
             if self.reset_counter <= 0:
                 # reset cursor each 1000 items
                 self.reset_counter = MAX_ITEMS_PER_QUERY
-                more_than_stars = more_than_stars + 1
+                more_than_stars = last_stargazers_count if more_than_stars != last_stargazers_count else more_than_stars + 1
                 next_cursor = "null"
             elif next_cursor is not None:
                 next_cursor = f"\"{_next_cursor}\""
