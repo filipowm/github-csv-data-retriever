@@ -106,36 +106,37 @@ class DataFetcher(object):
             readme = self.github.get_readme(repo['name_with_owner'])
             repo['readme'] = readme
 
-    def read_repos_data(self, max_projects, more_than_stars, start_cursor=None):
+    def read_repos_data(self, max_chunk_size, more_than_stars, start_cursor=None):
         parsed_start_cursor = start_cursor if start_cursor is not None else "null"
         gql = self.gql_format % (f"stars:>{more_than_stars}", PAGE_SIZE, parsed_start_cursor)
         repos_data = []
-        pages = math.ceil(max_projects / PAGE_SIZE)
+        page = 0
         next_cursor = start_cursor
-        logging.info(f"Reading repos data chunk with maximum of {max_projects} projects in {pages} pages with more than {more_than_stars} stars, starting from cursor {start_cursor}")
-        for i in range(pages):  # cap limit on 100k projects
-            logging.info(f"Reading page {i} with cursor {next_cursor} and above {more_than_stars} stars")
+        logging.info(f"Reading repos data chunk with {max_chunk_size} projects with more than {more_than_stars} stars, starting from cursor {start_cursor}")
+        while len(repos_data) < max_chunk_size:
+            page = page + 1
+            logging.info(f"Reading page {page} with cursor {next_cursor} and above {more_than_stars} stars")
             repos_stars_gql = self.github.graphql(gql)
             repos_data_part, _next_cursor = self.parse_gql_result(repos_stars_gql)
-            self.reset_counter = self.reset_counter - len(repos_data_part)
-            self.total_read = self.total_read + len(repos_data_part)
             if len(repos_data_part) == 0:
                 logging.info("No more data available in Github. Time to stop querying.")
                 break
-            logging.info("Enhancing fetched data with readme")
+            self.reset_counter = self.reset_counter - len(repos_data_part)
             last_stargazers_count = repos_data_part[-1]["stargazers_count"]
 
             # filter out already read projects in case of duplicated read
             repos_data_part = list(filter(lambda repo: repo['id'] not in self.read_ids, repos_data_part))
             self.read_ids.extend(list(map(lambda repo: repo['id'], repos_data_part)))
+            unique_projects_count = len(repos_data_part)
+            self.total_read = self.total_read + unique_projects_count
 
             # filter out projects without topics
+            logging.info(f"Enhancing {unique_projects_count} repos with readme")
             repos_data_part = list(filter(lambda repo: len(repo['topics']) > 0, repos_data_part))
             self._enhance_repos_with_readme(repos_data_part)
 
             # filter out projects without readme
             repos_data_part = list(filter(lambda repo: repo['readme'] is not None, repos_data_part))
-
             repos_data.extend(repos_data_part)
 
             if self.reset_counter <= 0:
@@ -184,7 +185,7 @@ def run():
     data_size_max = 500_000
     chunk_size = 3_000
     chunks_max = math.ceil(data_size_max / chunk_size)
-    start_from_stars = 1_00
+    start_from_stars = 3_00
 
     save_date = datetime.utcnow().strftime("%Y-%m-%d")
     processor = DataFetcher()
@@ -193,7 +194,7 @@ def run():
     start_cursor = "null"
     for i in range(chunks_max):
         logging.info(f"Reading data chunk {i}")
-        repos_data, next_cursor, last_more_than_stars = processor.read_repos_data(max_projects=chunk_size, more_than_stars=start_from_stars, start_cursor=start_cursor)
+        repos_data, next_cursor, last_more_than_stars = processor.read_repos_data(max_chunk_size=chunk_size, more_than_stars=start_from_stars, start_cursor=start_cursor)
         start_from_stars = last_more_than_stars
         if len(repos_data) == 0:
             logging.info("Data fetching has ended cause no data in sink.")
